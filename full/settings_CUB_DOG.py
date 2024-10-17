@@ -7,9 +7,9 @@ add_on_layers_type = 'regular'
 
 experiment_run = '001'
 
-data_path = '/mnt/c/chong/data/CUB_200_2011_full/'
+data_path = '/workspace/ST-ProtoPNet/data/CUB_200_2011/dataset/'
 train_dir = data_path + 'train/'
-test_dir = data_path + 'test/'
+test_dir = data_path + 'test_full/'
 train_push_dir = data_path + 'train'
 
 train_batch_size = 80

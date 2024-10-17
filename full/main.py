@@ -15,12 +15,13 @@ from util import save
 from util.log import create_logger
 from util.preprocess import mean, std, preprocess_input_function
 import settings_CUB_DOG
+import wandb
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-gpuid', type=str, default='0')
 # parser.add_argument('-arch', type=str, default='vgg16')
-parser.add_argument('-arch', type=str, default='vgg19')
+parser.add_argument('-arch', type=str, default='resnet50')
 # parser.add_argument('-arch',type=str, default='resnet34')
 # parser.add_argument('-arch',type=str, default='resnet50')
 # parser.add_argument('-arch',type=str, default='resnet152')
@@ -41,7 +42,12 @@ np.random.seed(args.rand_seed)
 torch.manual_seed(args.rand_seed)
 print("Random seed: ", args.rand_seed)
 
-
+# Initialize wandb with your project name and config
+wandb.init(
+    project="Hyperbolic_Hierarchical_ProtoNet",  # Name of your project on wandb
+    name="ST-ProtoPNet-Base",          # Name of the specific run/experiment
+    entity="rcl_stroke"
+)
 
 #setting parameter
 experiment_run = settings_CUB_DOG.experiment_run
@@ -60,15 +66,14 @@ if os.path.exists(model_dir) is True:
     shutil.rmtree(model_dir)
 makedir(model_dir)
 
-
 shutil.copy(src=os.path.join(os.getcwd(), __file__), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), 'settings_CUB_DOG.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), 'models', base_architecture_type + '_features.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), 'model.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), 'train_and_test.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), 'push_trivial.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), 'push_support.py'), dst=model_dir)
-shutil.copy(src=os.path.join(os.getcwd(), './util/helpers.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/settings_CUB_DOG.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/models', base_architecture_type + '_features.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/model.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/train_and_test.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/push_trivial.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/push_support.py'), dst=model_dir)
+shutil.copy(src=os.path.join(os.getcwd(), 'full/util/helpers.py'), dst=model_dir)
 
 log, logclose = create_logger(log_filename=os.path.join(model_dir, 'train.log'))
 img_dir = os.path.join(model_dir, 'img')

@@ -6,6 +6,8 @@ from util.helpers import list_of_distances_3d
 from util.helpers import list_of_distances_3d_dot
 from util.helpers import list_of_similarities_3d_dot
 import numpy as np
+import wandb
+from sklearn.metrics import balanced_accuracy_score, f1_score
 
 
 def _training(model, dataloader, optimizer=None, class_specific=True, use_l1_mask=True, coefs=None, log=print):
@@ -201,6 +203,15 @@ def _training(model, dataloader, optimizer=None, class_specific=True, use_l1_mas
                     'l1_support': model.module.last_layer_support.weight.norm(p=1).item(),
                     'accu': n_correct / n_examples
                     }
+    
+    # Log results to Weights and Biases
+    wandb.log({
+        'epoch/train/loss_Clst': results_loss['cross_entropy'],
+        'epoch/train/l1_trivial_norm': results_loss['l1_trivial'],
+        'epoch/train/l1_support_norm': results_loss['l1_support'],
+        'epoch/train/accuracy_nonbalanced': results_loss['accu'] ,
+    })
+
     return n_correct / n_examples, results_loss
 
 
@@ -217,6 +228,10 @@ def _testing(model, dataloader, optimizer=None, class_specific=True, use_l1_mask
     n_batches = 0
 
     total_cross_entropy = 0
+
+    # Initialize lists to store predictions and targets
+    all_preds = []
+    all_targets = []
 
     for i, (image, label) in enumerate(dataloader):
         input = image.cuda()
@@ -239,6 +254,10 @@ def _testing(model, dataloader, optimizer=None, class_specific=True, use_l1_mask
             n_batches += 1
             total_cross_entropy += cross_entropy.item()
 
+            # Store predictions and targets
+            all_preds.extend(predicted.cpu().numpy())
+            all_targets.extend(target.cpu().numpy())
+
         del input
         del target
         del output
@@ -256,6 +275,21 @@ def _testing(model, dataloader, optimizer=None, class_specific=True, use_l1_mask
                     'l1 support': model.module.last_layer_support.weight.norm(p=1).item(),
                     'accu': n_correct / n_examples
                     }
+    
+        # Calculate balanced accuracy and F1 score using sklearn
+    balanced_accuracy = balanced_accuracy_score(all_targets, all_preds)
+    f1_avg = f1_score(all_targets, all_preds, average='macro')  # You can use 'weighted' or 'micro' as needed
+
+    # Log results to Weights and Biases
+    wandb.log({
+        'epoch/test/loss_Clst': results_loss['cross_entropy'],
+        'epoch/test/l1_trivial_norm': results_loss['l1 trivial'],
+        'epoch/test/l1_support_norm': results_loss['l1 support'],
+        'epoch/test/accuracy_nonbalanced': results_loss['accu'] ,
+        'epoch/test/accuracy': balanced_accuracy,
+        'epoch/test/f1_mean': f1_avg
+    })
+
     return n_correct / n_examples, results_loss
 
 
