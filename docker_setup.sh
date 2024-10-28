@@ -20,6 +20,6 @@ DockerContainerBuild
 docker run -it --ipc=host \
       --gpus device=ALL \
       --name=Victoria_Torch_STProtoNet  \
-      --volume=$HOME/workspace/ST-ProtoPNet:/workspace/ST-ProtoPNet \
+      --volume=$HOME/workspace/Hyperbolic_Hierarchical_Protonet_dev/ST-ProtoPNet:/workspace/ST-ProtoPNet \
       --volume=/raid/home/hoomanv/workspace/Datasets/CUB_200_2011:/workspace/ST-ProtoPNet/data/CUB_200_2011 \
       $DOCKER_TAG

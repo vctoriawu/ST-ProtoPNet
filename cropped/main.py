@@ -18,7 +18,7 @@ import settings_CUB_CAR
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-gpuid',type=str, default='0') 
+parser.add_argument('-gpuid',type=str, default='5') 
 # parser.add_argument('-arch',type=str, default='vgg16')
 parser.add_argument('-arch',type=str, default='resnet34')
 
@@ -28,7 +28,7 @@ args = parser.parse_args()
 
 
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '4'
 print("GPU ID:", os.environ['CUDA_VISIBLE_DEVICES'])
 
 

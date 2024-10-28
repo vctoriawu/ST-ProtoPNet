@@ -17,9 +17,11 @@ from util.preprocess import mean, std, preprocess_input_function
 import settings_CUB_DOG
 import wandb
 
+from loss import Entailment
+
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-gpuid', type=str, default='0')
+parser.add_argument('-gpuid', type=str, default='4')
 # parser.add_argument('-arch', type=str, default='vgg16')
 parser.add_argument('-arch', type=str, default='resnet50')
 # parser.add_argument('-arch',type=str, default='resnet34')
@@ -43,11 +45,11 @@ torch.manual_seed(args.rand_seed)
 print("Random seed: ", args.rand_seed)
 
 # Initialize wandb with your project name and config
-wandb.init(
+'''wandb.init(
     project="Hyperbolic_Hierarchical_ProtoNet",  # Name of your project on wandb
-    name="ST-ProtoPNet-Base",          # Name of the specific run/experiment
+    name="ST-ProtoPNet-Part_Hyper_Mean",          # Name of the specific run/experiment
     entity="rcl_stroke"
-)
+)'''
 
 #setting parameter
 experiment_run = settings_CUB_DOG.experiment_run
@@ -187,6 +189,12 @@ joint_optimizer_specs = \
  {'params': ppnet.add_on_layers_support.parameters(), 'lr': joint_optimizer_lrs['add_on_layers'], 'weight_decay': weight_decay_factor*1e-3},
  {'params': ppnet.prototype_vectors_trivial, 'lr': joint_optimizer_lrs['prototype_vectors']},
  {'params': ppnet.prototype_vectors_support, 'lr': joint_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_prototype_vectors_trivial, 'lr': joint_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_prototype_vectors_support, 'lr': joint_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_attn_module_trivial.parameters(), 'lr': joint_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_attn_module_support.parameters(), 'lr': joint_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.curv, 'lr': joint_optimizer_lrs['hyper_params']},
+ {'params': ppnet.visual_alpha, 'lr': joint_optimizer_lrs['hyper_params']},
 ]
 joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
 if dataset_name == 'CUB':
@@ -202,6 +210,12 @@ warm_optimizer_specs = \
  {'params': ppnet.add_on_layers_support.parameters(), 'lr': warm_optimizer_lrs['add_on_layers'], 'weight_decay': weight_decay_factor*1e-3},
  {'params': ppnet.prototype_vectors_trivial, 'lr': warm_optimizer_lrs['prototype_vectors']},
  {'params': ppnet.prototype_vectors_support, 'lr': warm_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_prototype_vectors_trivial, 'lr': warm_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_prototype_vectors_support, 'lr': warm_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_attn_module_trivial.parameters(), 'lr': warm_optimizer_lrs['prototype_vectors']},
+ {'params': ppnet.global_attn_module_support.parameters(), 'lr': warm_optimizer_lrs['prototype_vectors']},
+# {'params': ppnet.curv, 'lr': warm_optimizer_lrs['hyper_params']},
+# {'params': ppnet.visual_alpha, 'lr': warm_optimizer_lrs['hyper_params']},
 ]
 warm_optimizer = torch.optim.Adam(warm_optimizer_specs)
 
@@ -213,6 +227,9 @@ last_layer_optimizer_specs = \
  {'params': ppnet.last_layer_support.parameters(), 'lr': last_layer_optimizer_lr},
 ]
 last_layer_optimizer = torch.optim.Adam(last_layer_optimizer_specs)
+
+# Entailment loss (for hierarchy)
+entailment_loss = Entailment(num_classes=num_classes, loss_weight=coefs['entailment'])
 
 #best acc
 best_acc = 0
@@ -229,16 +246,16 @@ for epoch in range(num_train_epochs):
     #train
     if epoch < num_warm_epochs:
         tnt.warm_only(model=ppnet_multi, log=log)
-        _, train_results = tnt.train(model=ppnet_multi, dataloader=train_loader, optimizer=warm_optimizer,
+        _, train_results = tnt.train(model=ppnet_multi, dataloader=train_loader, ent_loss=entailment_loss, optimizer=warm_optimizer,
                       class_specific=class_specific, coefs=coefs, log=log)
     else:
         tnt.joint(model=ppnet_multi, log=log)
         joint_lr_scheduler.step()
-        _, train_results = tnt.train(model=ppnet_multi, dataloader=train_loader, optimizer=joint_optimizer,
+        _, train_results = tnt.train(model=ppnet_multi, dataloader=train_loader, ent_loss=entailment_loss, optimizer=joint_optimizer,
                       class_specific=class_specific, coefs=coefs, log=log)
 
     # test
-    accu, test_results = tnt.test(model=ppnet_multi, dataloader=test_loader, class_specific=class_specific, log=log)
+    accu, test_results = tnt.test(model=ppnet_multi, dataloader=test_loader, ent_loss=entailment_loss, class_specific=class_specific, log=log)
     save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + 'nopush', accu=accu,
                                 target_accu=0.60, log=log)
 
@@ -271,7 +288,7 @@ for epoch in range(num_train_epochs):
             proto_bound_boxes_filename_prefix=proto_bound_boxes_filename_prefix,
             save_prototype_class_identity=True,
             log=log)
-        accu, test_results = tnt.test(model=ppnet_multi, dataloader=test_loader, class_specific=class_specific, log=log)
+        accu, test_results = tnt.test(model=ppnet_multi, dataloader=test_loader, ent_loss=entailment_loss, class_specific=class_specific, log=log)
         save.save_model_w_condition(model=ppnet, model_dir=model_dir, model_name=str(epoch) + 'push', accu=accu,
                                     target_accu=0.60, log=log)
     #stage3:  Training of FC layers

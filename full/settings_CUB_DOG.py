@@ -17,12 +17,14 @@ test_batch_size = 100
 train_push_batch_size = 100
 
 joint_optimizer_lrs = {'features': 1 * 1e-4,
+                       'hyper_params': 1 * 5e-4,
                        'add_on_layers': 3e-3,
                        'prototype_vectors': 3e-3}
 
 joint_lr_step_size = 10
 
 warm_optimizer_lrs = {'add_on_layers': 3e-3,
+                      'hyper_params': 1 * 5e-4,
                       'prototype_vectors': 3e-3}
 
 last_layer_optimizer_lr = 1e-4
@@ -35,8 +37,9 @@ coefs = {
     'sep_spt': 0.48,
     'orth': 1e-3,
     'l1': 1e-4,
-    'discr': 1.0,
-    'close': 1.0,
+    'discr': 0,
+    'close': 0,
+    'entailment': 0.2,
 }
 
 

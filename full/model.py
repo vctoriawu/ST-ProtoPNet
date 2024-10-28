@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,6 +12,7 @@ from models.vgg_features import vgg11_features, vgg11_bn_features, vgg13_feature
     vgg19_features, vgg19_bn_features
 
 from util.receptive_field import compute_proto_layer_rf_info_v2
+from util import lorentz as L
 
 base_architecture_to_features = {'resnet18': resnet18_features,
                                  'resnet34': resnet34_features,
@@ -35,7 +37,10 @@ class STProtoPNet(nn.Module):
     def __init__(self, features, img_size, prototype_shape,
                  proto_layer_rf_info, num_classes, init_weights=True,
                  prototype_activation_function='log',
-                 add_on_layers_type='bottleneck'):
+                 add_on_layers_type='bottleneck',
+                 num_global_prototypes_per_class: int = 1,
+                 learn_curv: bool = True,
+                 curv_init : float = 1.0):
 
         super(STProtoPNet, self).__init__()
         self.img_size = img_size
@@ -107,8 +112,75 @@ class STProtoPNet(nn.Module):
 
         self.ones = nn.Parameter(torch.ones(self.prototype_shape), requires_grad=False)
 
+        # dimension of the global prototypes is the same as the dimension of the part prototypes but the number of global prototypes is different
+        self.num_global_attn_map = num_global_prototypes_per_class
+        self.global_prototype_shape = (num_global_prototypes_per_class * self.num_classes,  # PG, for now G=1.
+                                       self.prototype_shape[1], 1, 1)
+        
+        # shape  (PG=num_classes*G, D, 1, 1)
+        self.global_prototype_vectors_trivial = nn.Parameter(torch.rand(self.global_prototype_shape), requires_grad=True)
+        self.global_prototype_vectors_support = nn.Parameter(torch.rand(self.global_prototype_shape), requires_grad=True)
+
+        self.global_attn_module_trivial = nn.Sequential(
+            nn.Conv2d(
+                in_channels=64,
+                out_channels=self.prototype_shape[1],
+                kernel_size=1,
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=self.prototype_shape[1],
+                out_channels=self.prototype_shape[1] // 2,
+                kernel_size=1,
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=self.prototype_shape[1] // 2,
+                out_channels=self.num_global_attn_map,
+                kernel_size=1,
+                bias=False,
+            ),
+        )
+
+        self.global_attn_module_support = nn.Sequential(
+            nn.Conv2d(
+                in_channels=64,
+                out_channels=self.prototype_shape[1],
+                kernel_size=1,
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=self.prototype_shape[1],
+                out_channels=self.prototype_shape[1] // 2,
+                kernel_size=1,
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=self.prototype_shape[1] // 2,
+                out_channels=self.num_global_attn_map,
+                kernel_size=1,
+                bias=False,
+            ),
+        )
+
         if init_weights:
             self._initialize_weights()
+
+        # Initialize curvature parameter. Hyperboloid curvature will be `-curv`.
+        self.curv = nn.Parameter(
+            torch.tensor(curv_init).log(), requires_grad=learn_curv
+        )
+        # When learning the curvature parameter, restrict it in this interval to
+        # prevent training instability.
+        self._curv_minmax = {
+            "max": math.log(curv_init * 10),
+            "min": math.log(curv_init / 10),
+        }
+        # Learnable scalars to ensure that image features have an expected
+        # unit norm before exponential map (at initialization).
+        self.visual_alpha = nn.Parameter(torch.tensor(self.prototype_shape[1] ** -0.5).log())
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def conv_features(self, x):
 
@@ -117,6 +189,16 @@ class STProtoPNet(nn.Module):
         x_support = self.add_on_layers_support(x)
 
         return x_trivial, x_support
+    
+    def get_global_attn_map(self, part_conv_features_trivial, part_conv_features_support):
+        # shape (N, G, H, W)   G=num_global_prots
+        global_attn_map_trivial = self.global_attn_module_trivial(part_conv_features_trivial)
+        global_attn_map_support = self.global_attn_module_support(part_conv_features_support)
+
+        # TODO experiment if absolute value is neeeded
+        global_attn_map_trivial = torch.abs(global_attn_map_trivial).unsqueeze(2)  # shape (N, G, 1, H, W)
+        global_attn_map_support = torch.abs(global_attn_map_support).unsqueeze(2)
+        return global_attn_map_trivial, global_attn_map_support
 
     def _cosine_convolution(self, prototypes, x):
 
@@ -128,17 +210,63 @@ class STProtoPNet(nn.Module):
 
     def prototype_distances(self, x):
 
-        conv_features_trivial, conv_features_support = self.conv_features(x)
-        cosine_similarities_trivial = self._cosine_convolution(self.prototype_vectors_trivial, conv_features_trivial)
-        cosine_similarities_support = self._cosine_convolution(self.prototype_vectors_support, conv_features_support)
+        ##### MERU-based operations for hyperbolic space analysis #####
+        self.curv.data = torch.clamp(self.curv.data, **self._curv_minmax)
+        _curv = self.curv.exp()
 
+        # Clamp scaling factors such that they do not up-scale the feature norms.
+        # Once `exp(scale) = 1`, they can simply be removed during inference.
+        self.visual_alpha.data = torch.clamp(self.visual_alpha.data, max=0.0)
+
+        part_conv_features_trivial, part_conv_features_support = self.conv_features(x)
+
+         ### global-level features
+        global_attn_map_triv, global_attn_map_supp = self.get_global_attn_map(part_conv_features_trivial, part_conv_features_support)  # shape (N, G, 1, H, W)
+        global_triv_feats_extracted = (global_attn_map_triv * part_conv_features_trivial.unsqueeze(1)).sum(dim=3).sum(dim=3)  # shape (N, G, D)
+        global_supp_feats_extracted = (global_attn_map_supp * part_conv_features_support.unsqueeze(1)).sum(dim=3).sum(dim=3)  # shape (N, G, D)
+
+        # Lift the conv features onto the hyperbloid
+        hyperbolic_part_trivial_feats = L.get_hyperbolic_feats(part_conv_features_trivial.permute(0,2,3,1), self.visual_alpha, self.curv, self.device)
+        hyperbolic_part_support_feats = L.get_hyperbolic_feats(part_conv_features_support.permute(0,2,3,1), self.visual_alpha, self.curv, self.device)
+
+        # Lift the global features onto the hyperbloid
+        hyperbolic_global_trivial_feats = L.get_hyperbolic_feats(global_triv_feats_extracted, self.visual_alpha, self.curv, self.device)
+        hyperbolic_global_support_feats = L.get_hyperbolic_feats(global_supp_feats_extracted, self.visual_alpha, self.curv, self.device)
+
+        # Calculate the lorentz distance instead of cosine
+        # cosine_similarities_trivial = self._cosine_convolution(self.prototype_vectors_trivial, conv_features_trivial)
+        # cosine_similarities_support = self._cosine_convolution(self.prototype_vectors_support, conv_features_support)
+        hyper_prototypes_triv = L.get_hyperbolic_feats(self.prototype_vectors_trivial.squeeze(),self.visual_alpha, self.curv, self.device)
+                
+        part_feat_prot_triv_lorentz_distance = L.pairwise_dist(hyperbolic_part_trivial_feats,
+                                                               hyper_prototypes_triv,
+                                                              #self.prototype_vectors_trivial.squeeze(),
+                                                              _curv)
+        # global min pooling (spatial across HxW)
+        part_feat_prot_triv_lorentz_distance = part_feat_prot_triv_lorentz_distance.permute(0,3,1,2)  # Shape (N, P, H, W)
+        # N, P, H, W = part_feat_prot_triv_lorentz_distance.shape
+        # part_triv_min_lorentz_distances = -F.max_pool2d(-part_feat_prot_triv_lorentz_distance, kernel_size=(H, W))  # shape (N, P, 1, 1)
+        # part_triv_min_lorentz_distances = part_triv_min_lorentz_distances.view(-1, self.num_prototypes)  # shape (N, P)
+        # part_triv_prototype_activations = self.distance_2_similarity(part_triv_min_lorentz_distances)  # shape (N, P)
+        hyper_prototypes_supp = L.get_hyperbolic_feats(self.prototype_vectors_support.squeeze(),self.visual_alpha, self.curv, self.device)        
+        part_feat_prot_supp_lorentz_distance = L.pairwise_dist(hyperbolic_part_support_feats,
+                                                               hyper_prototypes_supp,
+                                                              #self.prototype_vectors_support.squeeze(),
+                                                              _curv)
+        # global min pooling (spatial across HxW)
+        part_feat_prot_supp_lorentz_distance = part_feat_prot_supp_lorentz_distance.permute(0,3,1,2)  # Shape (N, P, H, W)
+        # N, P, H, W = part_feat_prot_supp_lorentz_distance.shape
+        # part_supp_min_lorentz_distances = -F.max_pool2d(-part_feat_prot_supp_lorentz_distance, kernel_size=(H, W))  # shape (N, P, 1, 1)
+        # part_supp_min_lorentz_distances = part_supp_min_lorentz_distances.view(-1, self.num_prototypes)  # shape (N, P)
+        # part_supp_prototype_activations = self.distance_2_similarity(part_supp_min_lorentz_distances)  # shape (N, P)
+        
         # Relu from Deformable ProtoPNet: https://github.com/jdonnelly36/Deformable-ProtoPNet/blob/main/model.py
         ################################################
-        cosine_similarities_trivial = torch.relu(cosine_similarities_trivial)
-        cosine_similarities_support = torch.relu(cosine_similarities_support)
+        lorentz_trivial = torch.relu(part_feat_prot_triv_lorentz_distance)
+        lorentz_support = torch.relu(part_feat_prot_supp_lorentz_distance)
         ################################################
 
-        return cosine_similarities_trivial, cosine_similarities_support
+        return lorentz_trivial, lorentz_support
 
     def distance_2_similarity(self, distances):
 
@@ -168,16 +296,16 @@ class STProtoPNet(nn.Module):
 
     def forward(self, x):
 
-        cosine_similarities_trivial, cosine_similarities_support = self.prototype_distances(x)
+        lorentz_trivial, lorentz_support = self.prototype_distances(x)
 
-        prototype_activations_trivial = self.global_max_pooling(cosine_similarities_trivial)
-        prototype_activations_support = self.global_max_pooling(cosine_similarities_support)
+        prototype_activations_trivial = self.global_max_pooling(lorentz_trivial)
+        prototype_activations_support = self.global_max_pooling(lorentz_support)
 
         logits_trivial = self.last_layer_trivial(prototype_activations_trivial)
         logits_support = self.last_layer_support(prototype_activations_support)
 
         return (logits_trivial, logits_support), (prototype_activations_trivial, prototype_activations_support), \
-               (cosine_similarities_trivial, cosine_similarities_support)
+               (lorentz_trivial, lorentz_support)
 
     def push_forward_trivial(self, x):
 
