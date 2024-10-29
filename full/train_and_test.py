@@ -80,8 +80,8 @@ def _training(model, dataloader, ent_loss, optimizer=None, class_specific=True, 
                 model.module.curv.data = torch.clamp(model.module.curv.data, **model.module._curv_minmax)
                 _curv = model.module.curv.exp()
                 
-                #hyper_prototypes_support = get_hyperbolic_feats(prototypes_matrix_support_reshaped, model.module.visual_alpha, model.module.curv, model.module.device)
-                simi_dot_support = pairwise_dist(prototypes_matrix_support_reshaped, prototypes_matrix_support_reshaped, _curv)  # [1000, 1000]
+                hyper_prototypes_support = get_hyperbolic_feats(prototypes_matrix_support_reshaped, model.module.visual_alpha, model.module.curv, model.module.device)
+                simi_dot_support = pairwise_dist(hyper_prototypes_support, hyper_prototypes_support, _curv)  # [1000, 1000]
                 #simi_dot_support = pairwise_dist_3d(prototypes_matrix_support, prototypes_matrix_support, _curv)  # [200, 5, 200, 5]
 
                 # similarity is negative of distance
@@ -96,16 +96,17 @@ def _training(model, dataloader, ent_loss, optimizer=None, class_specific=True, 
                 
                 prototypes_trivial = model.module.prototype_vectors_trivial.squeeze()
                 prototypes_matrix_trivial = prototypes_trivial.reshape(model.module.num_classes, num_proto_per_class, model.module.prototype_shape[1])  # [200, 5, 64]
-                #prototypes_matrix_trivial_reshaped = prototypes_matrix_trivial.reshape(-1, model.module.prototype_shape[1])
+                prototypes_matrix_trivial_reshaped = prototypes_matrix_trivial.reshape(-1, model.module.prototype_shape[1])
                 
-                simi_dot_trivial = pairwise_dist(prototypes_matrix_trivial.reshape(-1, model.module.prototype_shape[1]), prototypes_matrix_trivial.reshape(-1, model.module.prototype_shape[1]), _curv)  # [1000, 1000]
+                hyper_prototypes_trivial = get_hyperbolic_feats(prototypes_matrix_trivial_reshaped, model.module.visual_alpha, model.module.curv, model.module.device)
+                simi_dot_trivial = pairwise_dist(hyper_prototypes_trivial, hyper_prototypes_trivial, _curv)  # [1000, 1000]
                 # similarity is negative of distance
                 simi_dot_trivial = -simi_dot_trivial
                 
                 #simi_dot_trivial = list_of_similarities_3d_dot(prototypes_matrix_trivial, prototypes_matrix_trivial)  # [200, 5, 200, 5]
-                #simi_dot_trivial_reshaped = simi_dot_trivial.view(model.module.num_classes, num_proto_per_class, -1)
-                #simi_dot_trivial_reshaped = simi_dot_trivial_reshaped.view(model.module.num_classes, num_proto_per_class, model.module.num_classes, num_proto_per_class)
-                simi_dot_trivial_max = torch.max(simi_dot_trivial.reshape(model.module.num_classes, num_proto_per_class, model.module.num_classes, num_proto_per_class).permute(0, 2, 1, 3).reshape(model.module.num_classes, model.module.num_classes, -1), dim=-1)[0]  # [200, 200]
+                simi_dot_trivial_reshaped = simi_dot_trivial.view(model.module.num_classes, num_proto_per_class, -1)
+                simi_dot_trivial_reshaped = simi_dot_trivial_reshaped.view(model.module.num_classes, num_proto_per_class, model.module.num_classes, num_proto_per_class)
+                simi_dot_trivial_max = torch.max(simi_dot_trivial_reshaped.permute(0, 2, 1, 3).reshape(model.module.num_classes, model.module.num_classes, -1), dim=-1)[0]  # [200, 200]
                 discrimination_cost = (simi_dot_trivial_max * I_operator_c).sum() / I_operator_c.sum()
                 #######################################################################
 
@@ -115,23 +116,31 @@ def _training(model, dataloader, ent_loss, optimizer=None, class_specific=True, 
 
                 #prototypes_matrix_support_T = torch.transpose(prototypes_matrix_support, 1, 2)  # [200, 64, 5]
                 #orth_dot_support = torch.matmul(prototypes_matrix_support, prototypes_matrix_support_T)  # [200, 5, 64] * [200, 64, 5] -> [200, 5, 5]
-                orth_dot_support = pairwise_inner_3d(prototypes_matrix_support, prototypes_matrix_support)  # [200, 5, 64] * [200, 64, 5] -> [200, 5, 5]
+                hyper_prototypes_matrix_support = get_hyperbolic_feats(prototypes_matrix_support, model.module.visual_alpha, model.module.curv, model.module.device)
+                orth_dot_support = pairwise_inner_3d(hyper_prototypes_matrix_support, hyper_prototypes_matrix_support)  # [200, 5, 64] * [200, 64, 5] -> [200, 5, 5]
 
                 difference_support = orth_dot_support - I_operator_p  # [200, 5, 5] - [5, 5]-> [200, 5, 5]
-                orth_cost_support = torch.mean(torch.norm(difference_support, p=1, dim=[1, 2]))
+                orth_cost_support = torch.sum(torch.norm(difference_support, p=1, dim=[1, 2]))
 
                 #prototypes_matrix_trivial_T = torch.transpose(prototypes_matrix_trivial, 1, 2)  # [200, 64, 5]
                 #orth_dot_trivial = torch.matmul(prototypes_matrix_trivial, prototypes_matrix_trivial_T)  # [200, 5, 64] * [200, 64, 5] -> [200, 5, 5]
-                orth_dot_trivial = pairwise_inner_3d(prototypes_matrix_trivial, prototypes_matrix_trivial)  # [200, 5, 64] * [200, 64, 5] -> [200, 5, 5]
+                hyper_prototypes_matrix_trivial = get_hyperbolic_feats(prototypes_matrix_trivial, model.module.visual_alpha, model.module.curv, model.module.device)
+                orth_dot_trivial = pairwise_inner_3d(hyper_prototypes_matrix_trivial, hyper_prototypes_matrix_trivial)  # [200, 5, 64] * [200, 64, 5] -> [200, 5, 5]
                 difference_trivial = orth_dot_trivial - I_operator_p  # [200, 5, 5] - [5, 5]-> [200, 5, 5]
-                orth_cost_trivial = torch.mean(torch.norm(difference_trivial, p=1, dim=[1, 2]))
+                orth_cost_trivial = torch.sum(torch.norm(difference_trivial, p=1, dim=[1, 2]))
                 #######################################################################
 
                 del prototypes_matrix_support
+                del prototypes_matrix_support_reshaped
+                del hyper_prototypes_matrix_support
+                del hyper_prototypes_support
                 #del prototypes_matrix_support_T
                 del orth_dot_support
                 del difference_support
                 del prototypes_matrix_trivial
+                del prototypes_matrix_trivial_reshaped
+                del hyper_prototypes_matrix_trivial
+                del hyper_prototypes_trivial
                 #del prototypes_matrix_trivial_T
                 del orth_dot_trivial
                 del difference_trivial
@@ -175,7 +184,7 @@ def _training(model, dataloader, ent_loss, optimizer=None, class_specific=True, 
                                 + coefs['clst_trv'] * cluster_cost_trivial
                                 + coefs['sep_trv'] * separation_cost_trivial
                                 + coefs['orth'] * orth_cost_trivial
-                                #+ coefs['discr'] * discrimination_cost
+                                + coefs['discr'] * discrimination_cost
                                 + coefs['l1'] * l1_trivial 
                                 + entailment
                         )
@@ -192,8 +201,8 @@ def _training(model, dataloader, ent_loss, optimizer=None, class_specific=True, 
                 else:
                     loss = cross_entropy + entailment
 
-            if i == 1:
-                breakpoint()
+            #if i == 1:
+            #    breakpoint()
 
             optimizer.zero_grad()
             loss.backward()

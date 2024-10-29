@@ -37,8 +37,8 @@ coefs = {
     'sep_spt': 0.48,
     'orth': 1e-3,
     'l1': 1e-4,
-    'discr': 0,
-    'close': 0,
+    'discr': 1,
+    'close': 1,
     'entailment': 0.2,
 }
 
@@ -46,6 +46,6 @@ coefs = {
 num_train_epochs = 120
 num_warm_epochs = 10
 
-push_start = 100
+push_start = 121
 push_epochs = [i for i in range(num_train_epochs) if i % 10 == 0]     # 10
 

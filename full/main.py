@@ -45,11 +45,11 @@ torch.manual_seed(args.rand_seed)
 print("Random seed: ", args.rand_seed)
 
 # Initialize wandb with your project name and config
-'''wandb.init(
+wandb.init(
     project="Hyperbolic_Hierarchical_ProtoNet",  # Name of your project on wandb
-    name="ST-ProtoPNet-Part_Hyper_Mean",          # Name of the specific run/experiment
+    name="ST-ProtoPNet-Part_Hyper",          # Name of the specific run/experiment
     entity="rcl_stroke"
-)'''
+)
 
 #setting parameter
 experiment_run = settings_CUB_DOG.experiment_run
@@ -198,9 +198,9 @@ joint_optimizer_specs = \
 ]
 joint_optimizer = torch.optim.Adam(joint_optimizer_specs)
 if dataset_name == 'CUB':
-    joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=int(2 * joint_lr_step_size), gamma=0.2)  # CUB
+    joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=int(2 * joint_lr_step_size), gamma=0.8)  # CUB
 else:
-    joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=int(1 * joint_lr_step_size), gamma=0.2)  # DOG
+    joint_lr_scheduler = torch.optim.lr_scheduler.StepLR(joint_optimizer, step_size=int(1 * joint_lr_step_size), gamma=0.8)  # DOG
 
 
 from settings_CUB_DOG import warm_optimizer_lrs
@@ -214,8 +214,8 @@ warm_optimizer_specs = \
  {'params': ppnet.global_prototype_vectors_support, 'lr': warm_optimizer_lrs['prototype_vectors']},
  {'params': ppnet.global_attn_module_trivial.parameters(), 'lr': warm_optimizer_lrs['prototype_vectors']},
  {'params': ppnet.global_attn_module_support.parameters(), 'lr': warm_optimizer_lrs['prototype_vectors']},
-# {'params': ppnet.curv, 'lr': warm_optimizer_lrs['hyper_params']},
-# {'params': ppnet.visual_alpha, 'lr': warm_optimizer_lrs['hyper_params']},
+ {'params': ppnet.curv, 'lr': warm_optimizer_lrs['hyper_params']},
+ {'params': ppnet.visual_alpha, 'lr': warm_optimizer_lrs['hyper_params']},
 ]
 warm_optimizer = torch.optim.Adam(warm_optimizer_specs)
 

@@ -26,6 +26,7 @@ import math
 
 import torch
 from torch import Tensor
+from .acosh import acosh
 
 
 def pairwise_inner(x: Tensor, y: Tensor, curv: float | Tensor = 1.0):
@@ -106,7 +107,8 @@ def pairwise_dist(
     """
     # Ensure numerical stability in arc-cosh by clamping input.
     c_xyl = -curv * pairwise_inner(x, y, curv)
-    _distance = torch.acosh(torch.clamp(c_xyl, min=1 + eps))  #EQ 4
+    #_distance = torch.acosh(torch.clamp(c_xyl, min=1 + eps))  #EQ 4
+    _distance = acosh(c_xyl)
     t = _distance / curv**0.5
     return t
 
@@ -131,7 +133,8 @@ def pairwise_dist_3d(
     """
     # Ensure numerical stability in arc-cosh by clamping input.
     c_xyl = -curv * pairwise_inner_3d(x, y, curv)
-    _distance = torch.acosh(torch.clamp(c_xyl, min=1 + eps))  #EQ 4
+    #_distance = torch.acosh(torch.clamp(c_xyl, min=1 + eps))  #EQ 4
+    _distance = acosh(c_xyl)
     t = _distance / curv**0.5
     return t
 
@@ -194,7 +197,8 @@ def log_map0(x: Tensor, curv: float | Tensor = 1.0, eps: float = 1e-8, dim=-1) -
 
     # Calculate distance of vectors to the hyperboloid vertex.
     rc_x_time = torch.sqrt(1 + curv * torch.sum(x**2, dim=dim, keepdim=True))
-    _distance0 = torch.acosh(torch.clamp(rc_x_time, min=1 + eps))
+    #_distance0 = torch.acosh(torch.clamp(rc_x_time, min=1 + eps))
+    _distance0 = acosh(rc_x_time)
 
     rc_xnorm = curv**0.5 * torch.norm(x, dim=dim, keepdim=True)
     _output = _distance0 * x / torch.clamp(rc_xnorm, min=eps)
